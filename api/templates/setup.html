@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Configuration — Les Clés du Périgord</title>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@600&family=Archivo:wght@400;600&display=swap" rel="stylesheet">
+<style>
+body{background:#F1EDE3;color:#2A2419;font:15px/1.6 "Archivo",sans-serif;
+  max-width:640px;margin:0 auto;padding:3rem 1.2rem}
+h1{font-family:"Cormorant Garamond",serif}
+code{background:#FBF9F3;border:1px solid #DDD5C3;border-radius:6px;padding:.1rem .4rem}
+li{margin:.5rem 0}
+</style>
+</head>
+<body>
+<h1>Presque prêt !</h1>
+<p>Il manque des variables d'environnement. Sur Vercel : <strong>Settings → Environment Variables</strong>, ajoute :</p>
+<ul>
+  <li><code>AIRTABLE_TOKEN</code> — ton jeton d'accès Airtable (airtable.com/create/tokens, scopes <em>data.records:read</em> et <em>data.records:write</em> sur la base Gestion Ménages)</li>
+  <li><code>AIRTABLE_BASE_ID</code> — l'identifiant de la base (commence par <code>app…</code>)</li>
+  <li><code>GMAIL_USER</code> et <code>GMAIL_APP_PASSWORD</code> — pour l'envoi des récaps (mot de passe d'application Google)</li>
+  <li><code>APP_PASSWORD</code> — mot de passe d'accès à cette page (recommandé)</li>
+</ul>
+<p>Puis redéploie l'application.</p>
+</body>
+</html>

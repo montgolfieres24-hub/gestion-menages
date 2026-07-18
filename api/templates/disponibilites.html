@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% block titre %}Disponibilités{% endblock %}
+{% block h1 %}Disponibilités de l'équipe{% endblock %}
+
+{% block style %}
+.grille{overflow-x:auto;background:var(--carte);border:1px solid var(--ligne);
+  border-radius:12px;padding:1rem;margin-top:.6rem}
+table{border-collapse:collapse;width:100%}
+th,td{padding:.15rem;text-align:center}
+th.emp{text-align:left;padding-right:1rem;font-weight:600;white-space:nowrap}
+th.j{font-size:.68rem;color:var(--encre-2);font-weight:500}
+th.j .n{display:block;font-size:.85rem;color:var(--encre);font-weight:600}
+th.j.we{color:var(--bronze)}
+td form{margin:0}
+.case{width:2rem;height:2rem;border-radius:7px;border:1px solid var(--ligne);
+  cursor:pointer;padding:0;font-size:.7rem;line-height:1}
+.case.dispo{background:var(--laurier-pale)}
+.case.dispo:hover{background:#CBD9C6}
+.case.indispo{background:var(--alerte);border-color:var(--alerte);color:#fff;font-weight:700}
+.case.indispo:hover{background:#9A4517}
+.case.passe{opacity:.35;cursor:default}
+th.auj,td.auj .case{outline:2px solid var(--bronze)}
+.legende{display:flex;gap:1.4rem;margin:.9rem 0 0;color:var(--encre-2);font-size:.85rem;align-items:center}
+.pastille{display:inline-block;width:1rem;height:1rem;border-radius:5px;
+  vertical-align:-.15rem;margin-right:.35rem;border:1px solid var(--ligne)}
+{% endblock %}
+
+{% block contenu %}
+<div class="nav-mois">
+  <a href="/disponibilites?mois={{ mois_prec }}" aria-label="Mois précédent">←</a>
+  <h2>{{ label }}</h2>
+  <a href="/disponibilites?mois={{ mois_suiv }}" aria-label="Mois suivant">→</a>
+</div>
+
+{% if aucune_employee %}
+  <p class="vide">Aucune employée active. Ajoute ton équipe dans la table « Employées » d'Airtable (et coche « Active »).</p>
+{% else %}
+<div class="grille">
+  <table>
+    <tr>
+      <th class="emp"></th>
+      {% for d in jours_du_mois %}
+        <th class="j {{ 'we' if d.weekday() >= 5 }} {{ 'auj' if d == today }}">
+          {{ JOURS_COURTS[d.weekday()] }}<span class="n">{{ d.day }}</span>
+        </th>
+      {% endfor %}
+    </tr>
+    {% for ligne in lignes %}
+    <tr>
+      <th class="emp">{{ ligne.employee.fields.Nom }}</th>
+      {% for d in jours_du_mois %}
+        {% set indispo = d.isoformat() in ligne.indispo %}
+        <td class="{{ 'auj' if d == today }}">
+          {% if d < today %}
+            <span class="case passe {{ 'indispo' if indispo else 'dispo' }}"></span>
+          {% else %}
+          <form method="post" action="/disponibilite">
+            <input type="hidden" name="employee_id" value="{{ ligne.employee.id }}">
+            <input type="hidden" name="jour" value="{{ d.isoformat() }}">
+            <input type="hidden" name="mois" value="{{ premier.strftime('%Y-%m') }}">
+            <button class="case {{ 'indispo' if indispo else 'dispo' }}"
+              title="{{ ligne.employee.fields.Nom }} — {{ d | fr_date }} : {{ 'indisponible (cliquer pour libérer)' if indispo else 'disponible (cliquer pour marquer indisponible)' }}">
+              {{ '✕' if indispo }}
+            </button>
+          </form>
+          {% endif %}
+        </td>
+      {% endfor %}
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+<div class="legende">
+  <span><span class="pastille" style="background:var(--laurier-pale)"></span>Disponible</span>
+  <span><span class="pastille" style="background:var(--alerte);border-color:var(--alerte)"></span>Indisponible</span>
+  <span>Un clic sur une case inverse la disponibilité du jour.</span>
+</div>
+{% endif %}
+{% endblock %}

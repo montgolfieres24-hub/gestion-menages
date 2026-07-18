@@ -42,7 +42,7 @@ MOIS = ["janvier", "février", "mars", "avril", "mai", "juin", "juillet",
 
 app = FastAPI()
 templates = Jinja2Templates(
-    directory=str(Path(__file__).resolve().parent.parent / "templates")
+    directory=str(Path(__file__).resolve().parent / "templates")
 )
 
 
@@ -394,6 +394,94 @@ def envoyer_recaps(semaines: int) -> tuple[int, list[str]]:
     if statut_maj:
         at_update(T_MENAGES, list(statut_maj.values()))
     return envoyes, problemes
+
+
+# ---------------------------------------------------------------- diagnostic
+
+
+PAGE_ERREUR = """<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Erreur — Les Clés du Périgord</title></head>
+<body style="background:#F1EDE3;color:#2A2419;font:15px/1.6 sans-serif;
+max-width:640px;margin:0 auto;padding:3rem 1.2rem">
+<h1 style="font-weight:600">Aïe, quelque chose a coincé</h1>
+<p><strong>{titre}</strong></p><p>{conseil}</p>
+<p style="color:#6D6350;font-size:.85rem;word-break:break-all">Détail technique : {detail}</p>
+<p><a href="/sante">→ Page de diagnostic</a> · <a href="/">→ Réessayer</a></p>
+</body></html>"""
+
+
+def _expliquer(exc: Exception) -> tuple[str, str]:
+    if isinstance(exc, httpx.HTTPStatusError):
+        code = exc.response.status_code
+        if code in (401, 403):
+            return ("Airtable refuse l'accès (jeton invalide ou scopes insuffisants).",
+                    "Vérifie AIRTABLE_TOKEN sur Vercel : le jeton doit avoir les scopes "
+                    "data.records:read et data.records:write ET l'accès à la base "
+                    "Gestion Ménages. Après modification, redéploie l'application.")
+        if code == 404:
+            return ("Airtable ne trouve pas la base ou une table.",
+                    "Vérifie AIRTABLE_BASE_ID (doit être l'identifiant app… de la base "
+                    "Gestion Ménages) et que les tables s'appellent bien Logements, "
+                    "Employées, Indisponibilités et Ménages.")
+        return (f"Airtable a répondu avec une erreur {code}.",
+                "Réessaie dans un instant ; si ça persiste, vérifie la configuration.")
+    if exc.__class__.__name__ == "TemplateNotFound":
+        return ("Les fichiers d'interface (templates) manquent dans le déploiement.",
+                "Assure-toi que le dossier api/templates/ du zip a bien été envoyé "
+                "sur GitHub, puis redéploie.")
+    if isinstance(exc, (httpx.ConnectError, httpx.ReadTimeout, httpx.ConnectTimeout)):
+        return ("Impossible de joindre un service externe (Airtable ou Airbnb).",
+                "Vérifie les URL iCal dans la table Logements, puis réessaie.")
+    return ("Erreur inattendue.",
+            "Consulte la page de diagnostic ci-dessous, ou les logs Vercel "
+            "(onglet Deployments → ta version → Logs).")
+
+
+@app.exception_handler(Exception)
+async def gestionnaire_erreurs(request: Request, exc: Exception):
+    titre, conseil = _expliquer(exc)
+    detail = f"{exc.__class__.__name__}: {exc}"
+    return HTMLResponse(PAGE_ERREUR.format(titre=titre, conseil=conseil,
+                                           detail=detail), status_code=500)
+
+
+@app.get("/sante", response_class=HTMLResponse)
+def sante():
+    lignes = []
+
+    def ok(nom, etat, precision=""):
+        pastille = "✅" if etat else "❌"
+        lignes.append(f"<li>{pastille} {nom}{' — ' + precision if precision else ''}</li>")
+
+    ok("AIRTABLE_TOKEN défini", bool(AIRTABLE_TOKEN))
+    ok("AIRTABLE_BASE_ID défini", bool(BASE_ID), BASE_ID or "")
+    ok("GMAIL_USER défini", bool(GMAIL_USER))
+    ok("GMAIL_APP_PASSWORD défini", bool(GMAIL_APP_PASSWORD))
+    ok("APP_PASSWORD défini (recommandé)", bool(APP_PASSWORD))
+    tpl = Path(__file__).resolve().parent / "templates"
+    ok("Dossier templates présent", tpl.is_dir(),
+       ", ".join(sorted(p.name for p in tpl.glob("*.html"))) if tpl.is_dir() else "")
+
+    if AIRTABLE_TOKEN and BASE_ID:
+        for table in (T_LOGEMENTS, T_EMPLOYEES, T_INDISPOS, T_MENAGES):
+            try:
+                n = len(at_list(table))
+                ok(f"Table « {table} » accessible", True, f"{n} enregistrement(s)")
+            except httpx.HTTPStatusError as e:
+                ok(f"Table « {table} » accessible", False,
+                   f"Airtable a répondu {e.response.status_code}")
+            except Exception as e:  # noqa: BLE001
+                ok(f"Table « {table} » accessible", False, str(e))
+
+    return HTMLResponse(
+        "<!DOCTYPE html><html lang='fr'><head><meta charset='utf-8'>"
+        "<meta name='viewport' content='width=device-width, initial-scale=1'>"
+        "<title>Diagnostic</title></head>"
+        "<body style='background:#F1EDE3;color:#2A2419;font:15px/1.7 sans-serif;"
+        "max-width:640px;margin:0 auto;padding:3rem 1.2rem'>"
+        "<h1 style='font-weight:600'>Diagnostic</h1><ul style='list-style:none;padding:0'>"
+        + "".join(lignes) + "</ul><p><a href='/'>→ Retour à l'application</a></p></body></html>")
 
 
 # ---------------------------------------------------------------- accès
