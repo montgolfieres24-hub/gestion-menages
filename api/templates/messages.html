@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% block titre %}Messages{% endblock %}
+{% block h1 %}Messages pour l'équipe{% endblock %}
+
+{% block style %}
+.periode{display:flex;align-items:center;gap:.6rem;margin:.4rem 0 1.2rem;flex-wrap:wrap}
+.msg{background:var(--carte);border:1px solid var(--ligne);border-radius:12px;
+  padding:1rem 1.1rem;margin:.8rem 0}
+.msg-tete{display:flex;align-items:center;gap:.8rem;flex-wrap:wrap;margin-bottom:.6rem}
+.msg-tete .nom{font-weight:600;font-size:1.05rem}
+.msg-tete .tel{color:var(--encre-2)}
+.spacer{flex:1}
+pre{white-space:pre-wrap;background:var(--pierre);border:1px dashed var(--ligne);
+  border-radius:9px;padding:.8rem .9rem;font:inherit;margin:0 0 .7rem}
+.copier{background:var(--laurier);color:#fff;border:none;font-weight:600;
+  padding:.5rem 1.1rem;border-radius:9px;cursor:pointer}
+.copier.ok{background:var(--bronze)}
+.marquer{background:none;border:none;color:var(--laurier);font-weight:600;
+  cursor:pointer;text-decoration:underline}
+.deja{color:var(--encre-2);font-size:.85rem}
+{% endblock %}
+
+{% block contenu %}
+<form class="periode" method="get" action="/messages">
+  <a href="/">← Retour au tableau de bord</a>
+  <span class="spacer"></span>
+  <label for="semaines">Créneaux des</label>
+  <input type="number" id="semaines" name="semaines" value="{{ semaines }}" min="1" max="8" style="width:4.2rem"> semaines à venir
+  <button type="submit">Actualiser</button>
+</form>
+
+{% if not messages %}
+  <p class="vide">Aucun ménage assigné sur cette période — affecte d'abord tes employées depuis le tableau de bord.</p>
+{% endif %}
+
+{% for m in messages %}
+  <div class="msg">
+    <div class="msg-tete">
+      <span class="nom">{{ m.nom }}</span>
+      {% if m.telephone %}<span class="tel">{{ m.telephone }}</span>{% endif %}
+      <span class="deja">{{ m.nb }} ménage{{ 's' if m.nb > 1 }}{% if m.n_a_marquer == 0 %} · déjà marqué envoyé{% endif %}</span>
+      <span class="spacer"></span>
+      <button class="copier" type="button" data-cible="texte-{{ loop.index }}">Copier le message</button>
+      {% if m.n_a_marquer > 0 %}
+      <form method="post" action="/messages/marquer">
+        <input type="hidden" name="employee_id" value="{{ m.employee_id }}">
+        <input type="hidden" name="semaines" value="{{ semaines }}">
+        <button class="marquer" type="submit">Marquer envoyé</button>
+      </form>
+      {% endif %}
+    </div>
+    <pre id="texte-{{ loop.index }}">{{ m.texte }}</pre>
+  </div>
+{% endfor %}
+
+<script>
+document.querySelectorAll('.copier').forEach(function (btn) {
+  btn.addEventListener('click', function () {
+    var texte = document.getElementById(btn.dataset.cible).innerText;
+    function fini() {
+      btn.textContent = 'Copié ✓';
+      btn.classList.add('ok');
+      setTimeout(function () {
+        btn.textContent = 'Copier le message';
+        btn.classList.remove('ok');
+      }, 2500);
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(texte).then(fini);
+    } else {
+      var ta = document.createElement('textarea');
+      ta.value = texte; document.body.appendChild(ta);
+      ta.select(); document.execCommand('copy');
+      document.body.removeChild(ta); fini();
+    }
+  });
+});
+</script>
+{% endblock %}

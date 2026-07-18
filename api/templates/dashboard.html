@@ -103,14 +103,11 @@
 
 {% block pied %}
 <footer class="pied">
-  <form method="post" action="/envoyer-recaps"
-        onsubmit="return confirm('Envoyer à chaque employée son récapitulatif individuel par email ?')">
-    <label for="semaines">Récapitulatif des</label>
+  <form method="get" action="/messages">
+    <label for="semaines">Messages des</label>
     <input type="number" id="semaines" name="semaines" value="2" min="1" max="8" style="width:4.2rem"> semaines à venir
     <span class="spacer"></span>
-    <button class="envoi" type="submit" {% if not email_ok %}disabled title="Configure GMAIL_USER et GMAIL_APP_PASSWORD sur Vercel"{% endif %}>
-      Envoyer les récaps aux employées
-    </button>
+    <button class="envoi" type="submit">Préparer les messages à copier</button>
   </form>
 </footer>
 {% endblock %}

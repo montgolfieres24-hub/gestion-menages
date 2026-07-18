@@ -5,12 +5,8 @@ FastAPI + Airtable + flux iCal Airbnb. Conçu pour Vercel (api/index.py).
 
 import calendar as pycal
 import os
-import smtplib
-import ssl
 from collections import defaultdict
 from datetime import date, datetime, timedelta
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
 from pathlib import Path
 
 import httpx
@@ -23,8 +19,6 @@ from icalendar import Calendar
 
 AIRTABLE_TOKEN = os.environ.get("AIRTABLE_TOKEN", "")
 BASE_ID = os.environ.get("AIRTABLE_BASE_ID", "")
-GMAIL_USER = os.environ.get("GMAIL_USER", "")
-GMAIL_APP_PASSWORD = os.environ.get("GMAIL_APP_PASSWORD", "")
 APP_PASSWORD = os.environ.get("APP_PASSWORD", "")
 
 T_LOGEMENTS = "Logements"
@@ -316,11 +310,11 @@ def contexte_mois(mois: str | None):
     }
 
 
-# ---------------------------------------------------------------- emails
+# ---------------------------------------------------------------- messages
 
 
-def envoyer_recaps(semaines: int) -> tuple[int, list[str]]:
-    """Un email individuel par employée : uniquement SES créneaux."""
+def generer_messages(semaines: int) -> list[dict]:
+    """Prépare, pour chaque employée, le message texte de SES créneaux."""
     today = date.today()
     fin = today + timedelta(weeks=semaines)
     employees = {e["id"]: e for e in at_list(T_EMPLOYEES)}
@@ -339,61 +333,57 @@ def envoyer_recaps(semaines: int) -> tuple[int, list[str]]:
             for emp_id in f["Employée"]:
                 par_employee[emp_id].append((d, m))
 
-    envoyes, problemes, statut_maj = 0, [], {}
-    context = ssl.create_default_context()
-    with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=context) as smtp:
-        smtp.login(GMAIL_USER, GMAIL_APP_PASSWORD)
-        for emp_id, items in par_employee.items():
-            emp = employees.get(emp_id)
-            if not emp or not emp["fields"].get("Email"):
-                nom = emp["fields"].get("Nom", "?") if emp else "?"
-                problemes.append(f"{nom} : pas d'adresse email")
-                continue
-            items.sort(key=lambda x: x[0])
-            lignes_txt, lignes_html = [], []
-            for d, m in items:
-                f = m["fields"]
-                lg_id = (f.get("Logement") or [None])[0]
-                lg = logements.get(lg_id, {}).get("fields", {}).get("Nom", "?")
-                extra = " — nouveaux voyageurs le jour même (ménage prioritaire)" \
-                    if f.get("Arrivée le même jour") else ""
-                note = f" · {f['Notes']}" if f.get("Notes") else ""
-                lignes_txt.append(f"- {fr_date(d)} : {lg}{extra}{note}")
-                lignes_html.append(
-                    f"<li><strong>{fr_date(d)}</strong> : {lg}"
-                    f"{'<em>' + extra + '</em>' if extra else ''}{note}</li>")
+    messages = []
+    for emp_id, items in par_employee.items():
+        emp = employees.get(emp_id)
+        if not emp:
+            continue
+        items.sort(key=lambda x: x[0])
+        lignes = []
+        for d, m in items:
+            f = m["fields"]
+            lg_id = (f.get("Logement") or [None])[0]
+            lg = logements.get(lg_id, {}).get("fields", {}).get("Nom", "?")
+            extra = " (nouveaux voyageurs le jour même : ménage prioritaire)" \
+                if f.get("Arrivée le même jour") else ""
+            note = f" — {f['Notes']}" if f.get("Notes") else ""
+            lignes.append(f"• {fr_date(d)} : {lg}{extra}{note}")
 
-            prenom = emp["fields"]["Nom"].split()[0]
-            txt = (f"Bonjour {prenom},\n\n"
-                   f"Voici tes ménages prévus jusqu'au {fr_date(fin, False)} :\n\n"
-                   + "\n".join(lignes_txt)
-                   + "\n\nMerci de me signaler tout empêchement."
-                     "\n\nBonne journée,\nThibault — Les Clés du Périgord")
-            html = (f"<p>Bonjour {prenom},</p>"
-                    f"<p>Voici tes ménages prévus jusqu'au "
-                    f"<strong>{fr_date(fin, False)}</strong> :</p>"
-                    f"<ul>{''.join(lignes_html)}</ul>"
-                    "<p>Merci de me signaler tout empêchement.</p>"
-                    "<p>Bonne journée,<br>Thibault — Les Clés du Périgord</p>")
+        prenom = emp["fields"].get("Nom", "").split()[0] if emp["fields"].get("Nom") else ""
+        texte = (f"Bonjour {prenom},\n\n"
+                 f"Voici tes ménages prévus jusqu'au {fr_date(fin, False)} :\n\n"
+                 + "\n".join(lignes)
+                 + "\n\nMerci de me signaler tout empêchement.\n"
+                   "Thibault — Les Clés du Périgord")
+        messages.append({
+            "employee_id": emp_id,
+            "nom": emp["fields"].get("Nom", "?"),
+            "telephone": emp["fields"].get("Téléphone", ""),
+            "nb": len(items),
+            "n_a_marquer": sum(1 for _, m in items
+                               if m["fields"].get("Statut") == "Assigné"),
+            "texte": texte,
+        })
+    messages.sort(key=lambda m: m["nom"])
+    return messages
 
-            msg = MIMEMultipart("alternative")
-            msg["Subject"] = "Planning ménages — semaines à venir"
-            msg["From"] = f"Les Clés du Périgord <{GMAIL_USER}>"
-            msg["To"] = emp["fields"]["Email"]
-            msg.attach(MIMEText(txt, "plain", "utf-8"))
-            msg.attach(MIMEText(html, "html", "utf-8"))
-            try:
-                smtp.sendmail(GMAIL_USER, emp["fields"]["Email"], msg.as_string())
-                envoyes += 1
-                for _, m in items:
-                    if m["fields"].get("Statut") == "Assigné":
-                        statut_maj[m["id"]] = {"id": m["id"],
-                                               "fields": {"Statut": "Envoyé"}}
-            except Exception as e:  # noqa: BLE001
-                problemes.append(f"{emp['fields']['Nom']} : {e}")
-    if statut_maj:
-        at_update(T_MENAGES, list(statut_maj.values()))
-    return envoyes, problemes
+
+def marquer_envoye(employee_id: str, semaines: int):
+    """Passe à « Envoyé » les ménages « Assigné » de l'employée sur la période."""
+    today = date.today()
+    fin = today + timedelta(weeks=semaines)
+    maj = []
+    for m in at_list(T_MENAGES):
+        f = m["fields"]
+        if f.get("Statut") != "Assigné" or not f.get("Date"):
+            continue
+        if employee_id not in f.get("Employée", []):
+            continue
+        if today <= date.fromisoformat(f["Date"]) <= fin:
+            maj.append({"id": m["id"], "fields": {"Statut": "Envoyé"}})
+    if maj:
+        at_update(T_MENAGES, maj)
+    return len(maj)
 
 
 # ---------------------------------------------------------------- diagnostic
@@ -456,8 +446,6 @@ def sante():
 
     ok("AIRTABLE_TOKEN défini", bool(AIRTABLE_TOKEN))
     ok("AIRTABLE_BASE_ID défini", bool(BASE_ID), BASE_ID or "")
-    ok("GMAIL_USER défini", bool(GMAIL_USER))
-    ok("GMAIL_APP_PASSWORD défini", bool(GMAIL_APP_PASSWORD))
     ok("APP_PASSWORD défini (recommandé)", bool(APP_PASSWORD))
     tpl = Path(__file__).resolve().parent / "templates"
     ok("Dossier templates présent", tpl.is_dir(),
@@ -519,8 +507,7 @@ def dashboard(request: Request, message: str = "", alerte: str = ""):
     return templates.TemplateResponse(
         request, "dashboard.html",
         {**data, "today": date.today(), "message": message, "alerte": alerte,
-         "onglet": "dashboard", "max_emp": MAX_EMPLOYEES_PAR_MENAGE,
-         "email_ok": bool(GMAIL_USER and GMAIL_APP_PASSWORD)})
+         "onglet": "dashboard", "max_emp": MAX_EMPLOYEES_PAR_MENAGE})
 
 
 @app.post("/affecter")
@@ -548,20 +535,24 @@ def statut(request: Request, menage_id: str = Form(...),
     return RedirectResponse("/", status_code=303)
 
 
-@app.post("/envoyer-recaps")
-def recaps(request: Request, semaines: int = Form(2)):
+@app.get("/messages", response_class=HTMLResponse)
+def messages(request: Request, semaines: int = 2, copie: str = ""):
     if not connecte(request):
         return RedirectResponse("/login", status_code=303)
-    if not GMAIL_USER or not GMAIL_APP_PASSWORD:
-        return RedirectResponse(
-            "/?alerte=Configure GMAIL_USER et GMAIL_APP_PASSWORD sur Vercel",
-            status_code=303)
-    envoyes, problemes = envoyer_recaps(max(1, min(semaines, 8)))
-    msg = f"{envoyes} récapitulatif{'s' if envoyes > 1 else ''} envoyé{'s' if envoyes > 1 else ''}"
-    if problemes:
-        return RedirectResponse(
-            f"/?message={msg}&alerte={' · '.join(problemes)}", status_code=303)
-    return RedirectResponse(f"/?message={msg}", status_code=303)
+    semaines = max(1, min(semaines, 8))
+    return templates.TemplateResponse(
+        request, "messages.html",
+        {"messages": generer_messages(semaines), "semaines": semaines,
+         "copie": copie, "onglet": "dashboard"})
+
+
+@app.post("/messages/marquer")
+def messages_marquer(request: Request, employee_id: str = Form(...),
+                     semaines: int = Form(2)):
+    if not connecte(request):
+        return RedirectResponse("/login", status_code=303)
+    marquer_envoye(employee_id, max(1, min(semaines, 8)))
+    return RedirectResponse(f"/messages?semaines={semaines}", status_code=303)
 
 
 # ------------------------------------------------ onglet disponibilités
